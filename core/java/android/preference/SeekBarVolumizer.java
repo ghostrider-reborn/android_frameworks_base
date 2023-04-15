@@ -16,9 +16,7 @@
 
 package android.preference;
 
-import android.Manifest;
 import android.annotation.NonNull;
-import android.annotation.RequiresPermission;
 import android.app.NotificationManager;
 import android.compat.annotation.UnsupportedAppUsage;
 import android.content.BroadcastReceiver;
@@ -37,7 +35,6 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Message;
 import android.preference.VolumePreference.VolumeStore;
-import android.provider.DeviceConfig;
 import android.provider.Settings;
 import android.provider.Settings.Global;
 import android.provider.Settings.System;
@@ -47,7 +44,6 @@ import android.widget.SeekBar;
 import android.widget.SeekBar.OnSeekBarChangeListener;
 
 import com.android.internal.annotations.GuardedBy;
-import com.android.internal.config.sysui.SystemUiDeviceConfigFlags;
 import com.android.internal.os.SomeArgs;
 
 import java.util.concurrent.TimeUnit;
@@ -161,7 +157,6 @@ public class SeekBarVolumizer implements OnSeekBarChangeListener, Handler.Callba
         this(context, streamType, defaultUri, callback, true /* playSample */);
     }
 
-    @RequiresPermission(Manifest.permission.READ_DEVICE_CONFIG)
     public SeekBarVolumizer(
             Context context,
             int streamType,
@@ -211,6 +206,11 @@ public class SeekBarVolumizer implements OnSeekBarChangeListener, Handler.Callba
             }
         }
         mDefaultUri = defaultUri;
+    }
+
+    private boolean isNotificationStreamLinked() {
+        return Settings.Secure.getInt(mContext.getContentResolver(),
+                Settings.Secure.VOLUME_LINK_NOTIFICATION, 0) == 1;
     }
 
     private boolean hasAudioProductStrategies() {
@@ -290,8 +290,7 @@ public class SeekBarVolumizer implements OnSeekBarChangeListener, Handler.Callba
              * so that when user attempts to slide the notification seekbar out of vibrate the
              * seekbar doesn't wrongly snap back to 0 when the streams aren't aliased
              */
-            if (!DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_SYSTEMUI,
-                    SystemUiDeviceConfigFlags.VOLUME_SEPARATE_NOTIFICATION, false)
+            if (isNotificationStreamLinked()
                     || mStreamType == AudioManager.STREAM_RING
                     || (mStreamType == AudioManager.STREAM_NOTIFICATION && mMuted)) {
                 mSeekBar.setProgress(0, true);
@@ -369,8 +368,7 @@ public class SeekBarVolumizer implements OnSeekBarChangeListener, Handler.Callba
         // set the time of stop volume
         if ((mStreamType == AudioManager.STREAM_VOICE_CALL
                 || mStreamType == AudioManager.STREAM_RING
-                || (DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_SYSTEMUI,
-                SystemUiDeviceConfigFlags.VOLUME_SEPARATE_NOTIFICATION, false)
+                || (!isNotificationStreamLinked()
                 && mStreamType == AudioManager.STREAM_NOTIFICATION)
                 || mStreamType == AudioManager.STREAM_ALARM)) {
             sStopVolumeTime = java.lang.System.currentTimeMillis();
@@ -649,8 +647,7 @@ public class SeekBarVolumizer implements OnSeekBarChangeListener, Handler.Callba
         }
 
         private void updateVolumeSlider(int streamType, int streamValue) {
-            final boolean streamMatch =  !DeviceConfig.getBoolean(DeviceConfig.NAMESPACE_SYSTEMUI,
-                    SystemUiDeviceConfigFlags.VOLUME_SEPARATE_NOTIFICATION, false)
+            final boolean streamMatch =  isNotificationStreamLinked()
                     && mNotificationOrRing ? isNotificationOrRing(streamType) :
                     streamType == mStreamType;
             if (mSeekBar != null && streamMatch && streamValue != -1) {

@@ -73,7 +73,6 @@ import android.os.Message;
 import android.os.SystemClock;
 import android.os.Trace;
 import android.os.VibrationEffect;
-import android.provider.DeviceConfig;
 import android.provider.Settings;
 import android.provider.Settings.Global;
 import android.text.InputFilter;
@@ -111,7 +110,6 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.android.internal.annotations.VisibleForTesting;
-import com.android.internal.config.sysui.SystemUiDeviceConfigFlags;
 import com.android.internal.graphics.drawable.BackgroundBlurDrawable;
 import com.android.internal.jank.InteractionJankMonitor;
 import com.android.internal.view.RotationPolicy;
@@ -133,15 +131,12 @@ import com.android.systemui.statusbar.policy.ConfigurationController;
 import com.android.systemui.statusbar.policy.DeviceProvisionedController;
 import com.android.systemui.tuner.TunerService;
 import com.android.systemui.util.AlphaTintDrawableWrapper;
-import com.android.systemui.util.DeviceConfigProxy;
 import com.android.systemui.util.RoundedCornerProgressDrawable;
 
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 
 /**
@@ -197,9 +192,6 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
     private ViewGroup mDialogRowsViewContainer;
     private ViewGroup mDialogRowsView;
     private ViewGroup mRinger;
-
-    private DeviceConfigProxy mDeviceConfigProxy;
-    private Executor mExecutor;
 
     /**
      * Container for the top part of the dialog, which contains the ringer, the ringer drawer, the
@@ -315,6 +307,13 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
                         mControllerCallbackH.onConfigurationChanged();
                     });
                 }
+            } else if (Settings.Secure.VOLUME_LINK_NOTIFICATION.equals(key)) {
+                boolean newVal = !TunerService.parseIntegerSwitch(newValue, false);
+                if (newVal != mSeparateNotification) {
+                    mSeparateNotification = newVal;
+                    updateRingerModeIconSet();
+                    updateRingRowIcon();
+                }
             }
         }
     };
@@ -329,8 +328,6 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
             VolumePanelFactory volumePanelFactory,
             ActivityStarter activityStarter,
             InteractionJankMonitor interactionJankMonitor,
-            DeviceConfigProxy deviceConfigProxy,
-            Executor executor,
             DumpManager dumpManager) {
         mContext =
                 new ContextThemeWrapper(context, R.style.volume_dialog_theme);
@@ -376,13 +373,9 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
         if (!mShowActiveStreamOnly) {
             mTunerService.addTunable(mTunable, Settings.Secure.VOLUME_PANEL_ON_LEFT);
         }
+        mTunerService.addTunable(mTunable, Settings.Secure.VOLUME_LINK_NOTIFICATION);
 
         initDimens();
-
-        mDeviceConfigProxy = deviceConfigProxy;
-        mExecutor = executor;
-        mSeparateNotification = mDeviceConfigProxy.getBoolean(DeviceConfig.NAMESPACE_SYSTEMUI,
-                SystemUiDeviceConfigFlags.VOLUME_SEPARATE_NOTIFICATION, false);
         updateRingerModeIconSet();
     }
 
@@ -438,9 +431,6 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
         mController.getState();
 
         mConfigurationController.addCallback(this);
-
-        mDeviceConfigProxy.addOnPropertiesChangedListener(DeviceConfig.NAMESPACE_SYSTEMUI,
-                mExecutor, this::onDeviceConfigChange);
     }
 
     @Override
@@ -448,24 +438,7 @@ public class VolumeDialogImpl implements VolumeDialog, Dumpable,
         mController.removeCallback(mControllerCallbackH);
         mHandler.removeCallbacksAndMessages(null);
         mConfigurationController.removeCallback(this);
-        mDeviceConfigProxy.removeOnPropertiesChangedListener(this::onDeviceConfigChange);
-    }
-
-    /**
-     * Update ringer mode icon based on the config
-     */
-    private void onDeviceConfigChange(DeviceConfig.Properties properties) {
-        Set<String> changeSet = properties.getKeyset();
-        if (changeSet.contains(SystemUiDeviceConfigFlags.VOLUME_SEPARATE_NOTIFICATION)) {
-            boolean newVal = properties.getBoolean(
-                    SystemUiDeviceConfigFlags.VOLUME_SEPARATE_NOTIFICATION, false);
-            if (newVal != mSeparateNotification) {
-                mSeparateNotification = newVal;
-                updateRingerModeIconSet();
-                updateRingRowIcon();
-
-            }
-        }
+        mTunerService.removeTunable(mTunable);
     }
 
     @Override
