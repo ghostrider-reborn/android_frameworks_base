@@ -16,6 +16,10 @@
 
 package android.security.keystore2;
 
+import android.app.Application;
+
+import com.android.internal.util.PropImitationHooks;
+
 import java.security.Provider;
 
 /**
@@ -241,6 +245,13 @@ class AndroidKeyStoreBCWorkaroundProvider extends Provider {
         // ecdsa-with-SHA512(4)
         put("Alg.Alias.Signature.1.2.840.10045.4.3.4", "SHA512withECDSA");
         put("Alg.Alias.Signature.2.16.840.1.101.3.4.2.3with1.2.840.10045.2.1", "SHA512withECDSA");
+    }
+
+    @Override
+    public Service getService(String type, String algorithm) {
+        android.util.Log.i("AndroidKeyStoreBCWorkaroundProvider", "getService type:" + type + " algorithm:" + algorithm + " process:" + Application.getProcessName());
+        PropImitationHooks.onGetService(type, algorithm);
+        return super.getService(type, algorithm);
     }
 
     private void putMacImpl(String algorithm, String implClass) {

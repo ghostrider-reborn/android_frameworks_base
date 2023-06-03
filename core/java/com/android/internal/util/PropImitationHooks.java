@@ -20,6 +20,9 @@ import android.app.Application;
 import android.content.Context;
 import android.content.res.Resources;
 import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemProperties;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -33,7 +36,7 @@ import java.util.Set;
 public class PropImitationHooks {
 
     private static final String TAG = "PropImitationHooks";
-    private static final boolean DEBUG = false;
+    private static final boolean DEBUG = true;
 
     private static final String[] sCertifiedProps =
             Resources.getSystem().getStringArray(R.array.config_certifiedBuildProperties);
@@ -43,6 +46,9 @@ public class PropImitationHooks {
 
     private static final boolean sSpoofPhotos =
             Resources.getSystem().getBoolean(R.bool.config_spoofGooglePhotos);
+
+    private static final boolean sEnabled =
+            SystemProperties.getBoolean("persist.sys.pihooks.enabled", true);
 
     private static final String PACKAGE_ARCORE = "com.google.ar.core";
     private static final String PACKAGE_FINSKY = "com.android.vending";
@@ -75,7 +81,17 @@ public class PropImitationHooks {
     private static volatile boolean sIsFinsky = false;
     private static volatile boolean sIsPhotos = false;
 
+    private static volatile Handler sHandler;
+    private static volatile boolean sIsGmsPatching = false;
+    private static final long GMS_PATCH_DURATION = 2000L;
+
+    private static final String[] sOriginalProps = new String[] {
+        Build.DEVICE, Build.PRODUCT, Build.MODEL, Build.FINGERPRINT
+    };
+
     public static void setProps(Context context) {
+        if (!sEnabled) return;
+
         final String packageName = context.getPackageName();
         final String processName = Application.getProcessName();
 
@@ -88,17 +104,10 @@ public class PropImitationHooks {
         sIsFinsky = packageName.equals(PACKAGE_FINSKY);
         sIsPhotos = sSpoofPhotos && packageName.equals(PACKAGE_GPHOTOS);
 
-        /* Set certified properties for GMSCore
-         * Set stock fingerprint for ARCore
+        /* Set stock fingerprint for ARCore
          * Set Pixel XL for Google Photos and Snapchat
          */
-        if (sCertifiedProps.length == 4 && sIsGms) {
-            dlog("Spoofing build for GMS");
-            setPropValue("DEVICE", sCertifiedProps[0]);
-            setPropValue("PRODUCT", sCertifiedProps[1]);
-            setPropValue("MODEL", sCertifiedProps[2]);
-            setPropValue("FINGERPRINT", sCertifiedProps[3]);
-        } else if (!sStockFp.isEmpty() && packageName.equals(PACKAGE_ARCORE)) {
+        if (!sStockFp.isEmpty() && packageName.equals(PACKAGE_ARCORE)) {
             dlog("Setting stock fingerprint for: " + packageName);
             setPropValue("FINGERPRINT", sStockFp);
         } else if (sIsPhotos || packageName.equals(PACKAGE_SNAPCHAT)) {
@@ -129,6 +138,41 @@ public class PropImitationHooks {
         if (isCallerSafetyNet() || sIsFinsky) {
             dlog("Blocked key attestation sIsGms=" + sIsGms + " sIsFinsky=" + sIsFinsky);
             throw new UnsupportedOperationException();
+        }
+    }
+
+    private static void setCertifiedProps(String[] props) {
+        // sanity check
+        if (props.length != 4) {
+            Log.e(TAG, "setGmsProps: insufficient array size: " + props.length);
+            return;
+        }
+        setPropValue("DEVICE", props[0]);
+        setPropValue("PRODUCT", props[1]);
+        setPropValue("MODEL", props[2]);
+        setPropValue("FINGERPRINT", props[3]);
+    }
+
+    public static void onGetService(String type, String algorithm) {
+        // Arrays.stream(Thread.currentThread().getStackTrace()).forEach(elem -> dlog("onGetService stack trace class:" + elem.getClassName()));
+        if (isCallerSafetyNet() //&& (algorithm.equals("AndroidCAStore") || algorithm.equals("AndroidKeyStore"))
+                /*type.equals("KeyStore")*/) {
+            dlog("Begin new GMS patch");
+            if (sHandler == null) {
+                sHandler = new Handler(Looper.getMainLooper());
+            }
+            if (sIsGmsPatching) {
+                dlog("GMS already patching, restart timer");
+                sHandler.removeCallbacksAndMessages(null);
+            } else {
+                sIsGmsPatching = true;
+                setCertifiedProps(sCertifiedProps);
+            }
+            sHandler.postDelayed(() -> {
+                setCertifiedProps(sOriginalProps);
+                sIsGmsPatching = false;
+                dlog("End new GMS patch");
+            }, GMS_PATCH_DURATION);
         }
     }
 

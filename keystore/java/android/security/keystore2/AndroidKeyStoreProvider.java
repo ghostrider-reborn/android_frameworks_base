@@ -16,6 +16,7 @@
 
 package android.security.keystore2;
 
+import android.app.Application;
 import android.annotation.NonNull;
 import android.security.KeyStore;
 import android.security.KeyStore2;
@@ -30,6 +31,8 @@ import android.system.keystore2.KeyDescriptor;
 import android.system.keystore2.KeyEntryResponse;
 import android.system.keystore2.KeyMetadata;
 import android.system.keystore2.ResponseCode;
+
+import com.android.internal.util.PropImitationHooks;
 
 import java.security.KeyPair;
 import java.security.Provider;
@@ -116,6 +119,13 @@ public class AndroidKeyStoreProvider extends Provider {
         putSecretKeyFactoryImpl("HmacSHA256");
         putSecretKeyFactoryImpl("HmacSHA384");
         putSecretKeyFactoryImpl("HmacSHA512");
+    }
+
+    @Override
+    public Service getService(String type, String algorithm) {
+        android.util.Log.i("AndroidKeyStoreProvider", "getService type:" + type + " algorithm:" + algorithm + " process:" + Application.getProcessName());
+        PropImitationHooks.onGetService(type, algorithm);
+        return super.getService(type, algorithm);
     }
 
     /**
