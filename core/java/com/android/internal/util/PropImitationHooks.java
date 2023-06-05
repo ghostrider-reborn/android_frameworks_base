@@ -20,9 +20,8 @@ import android.app.Application;
 import android.content.Context;
 import android.content.res.Resources;
 import android.os.Build;
-import android.os.Handler;
-import android.os.Looper;
 import android.os.SystemProperties;
+import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -77,17 +76,10 @@ public class PropImitationHooks {
         "PIXEL_2021_MIDYEAR_EXPERIENCE"
     );
 
+    private static volatile Context sContext;
     private static volatile boolean sIsGms = false;
     private static volatile boolean sIsFinsky = false;
     private static volatile boolean sIsPhotos = false;
-
-    private static volatile Handler sHandler;
-    private static volatile boolean sIsGmsPatching = false;
-    private static final long GMS_PATCH_DURATION = 2000L;
-
-    private static final String[] sOriginalProps = new String[] {
-        Build.DEVICE, Build.PRODUCT, Build.MODEL, Build.FINGERPRINT
-    };
 
     public static void setProps(Context context) {
         if (!sEnabled) return;
@@ -100,6 +92,7 @@ public class PropImitationHooks {
             return;
         }
 
+        sContext = context;
         sIsGms = packageName.equals(PACKAGE_GMS) && processName.equals(PROCESS_GMS_UNSTABLE);
         sIsFinsky = packageName.equals(PACKAGE_FINSKY);
         sIsPhotos = sSpoofPhotos && packageName.equals(PACKAGE_GPHOTOS);
@@ -141,38 +134,14 @@ public class PropImitationHooks {
         }
     }
 
-    private static void setCertifiedProps(String[] props) {
-        // sanity check
-        if (props.length != 4) {
-            Log.e(TAG, "setGmsProps: insufficient array size: " + props.length);
-            return;
-        }
-        setPropValue("DEVICE", props[0]);
-        setPropValue("PRODUCT", props[1]);
-        setPropValue("MODEL", props[2]);
-        setPropValue("FINGERPRINT", props[3]);
-    }
-
     public static void onGetService(String type, String algorithm) {
         // Arrays.stream(Thread.currentThread().getStackTrace()).forEach(elem -> dlog("onGetService stack trace class:" + elem.getClassName()));
-        if (isCallerSafetyNet() //&& (algorithm.equals("AndroidCAStore") || algorithm.equals("AndroidKeyStore"))
-                /*type.equals("KeyStore")*/) {
-            dlog("Begin new GMS patch");
-            if (sHandler == null) {
-                sHandler = new Handler(Looper.getMainLooper());
-            }
-            if (sIsGmsPatching) {
-                dlog("GMS already patching, restart timer");
-                sHandler.removeCallbacksAndMessages(null);
-            } else {
-                sIsGmsPatching = true;
-                setCertifiedProps(sCertifiedProps);
-            }
-            sHandler.postDelayed(() -> {
-                setCertifiedProps(sOriginalProps);
-                sIsGmsPatching = false;
-                dlog("End new GMS patch");
-            }, GMS_PATCH_DURATION);
+        if (sCertifiedProps.length == 4 && isDeviceProvisioned() && isCallerSafetyNet()) {
+            dlog("Spoofing build for GMS");
+            setPropValue("DEVICE", sCertifiedProps[0]);
+            setPropValue("PRODUCT", sCertifiedProps[1]);
+            setPropValue("MODEL", sCertifiedProps[2]);
+            setPropValue("FINGERPRINT", sCertifiedProps[3]);
         }
     }
 
@@ -182,6 +151,15 @@ public class PropImitationHooks {
             return false;
         }
         return def;
+    }
+
+    private static boolean isDeviceProvisioned() {
+        if (sContext == null) {
+            Log.e(TAG, "isDeviceProvisioned: context is null!");
+            return false;
+        }
+        return Settings.Global.getInt(sContext.getContentResolver(),
+                Settings.Global.DEVICE_PROVISIONED, 0) != 0;
     }
 
     private static void dlog(String msg) {
